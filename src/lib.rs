@@ -252,12 +252,14 @@ pub mod table_classes {
     use super::lmdb::core::{MdbResult, DbIntKey, DbAllowDups, DbAllowIntDups, DbDupFixed};
     use super::{sort, sort_reverse};
 
-    /// CREATE TABLE (a: u64, b: u64, UNIQUE (a ASC, b ASC))
-    pub struct Unique__u64_u64;
+    pub type Id64 = u64;
 
-    impl TableClass for Unique__u64_u64 {
-        type Key = u64;
-        type Value = u64;
+    /// CREATE TABLE (a: Id64, b: Id64, UNIQUE (a ASC, b ASC))
+    pub struct Unique__Id64_Id64;
+
+    impl TableClass for Unique__Id64_Id64 {
+        type Key = Id64;
+        type Value = Id64;
 
         fn dbflags() -> DbFlags {
             use ::std::mem;
@@ -270,12 +272,12 @@ pub mod table_classes {
         fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
     }
 
-    /// CREATE TABLE (a: u64, b: u64, UNIQUE (a ASC, b DESC))
-    pub struct Unique__u64_u64rev;
+    /// CREATE TABLE (a: Id64, b: Id64, UNIQUE (a ASC, b DESC))
+    pub struct Unique__Id64_Id64Rev;
 
-    impl super::TableClass for Unique__u64_u64rev {
-        type Key = u64;
-        type Value = u64;
+    impl super::TableClass for Unique__Id64_Id64Rev {
+        type Key = Id64;
+        type Value = Id64;
 
         fn dbflags() -> DbFlags {
             use ::std::mem;
@@ -298,7 +300,7 @@ fn test_simple_table() {
 
     let env = lmdb::EnvBuilder::new().max_dbs(2).autocreate_dir(true).open(&Path::new("./test/db1"), 0o777).unwrap();
 
-    table_def!(MyFirstTable, table_classes::Unique__u64_u64rev, "my_first_table");
+    table_def!(MyFirstTable, table_classes::Unique__Id64_Id64Rev, "my_first_table");
 
     // A Unique(Id64, Id64 DESC) table
     let table_handle = MyFirstTable::create_table(&env).unwrap();
