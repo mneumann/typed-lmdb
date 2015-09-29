@@ -19,6 +19,18 @@ macro_rules! table_def {
     };
 }
 
+#[macro_export]
+macro_rules! lmdb_not_found {
+    (
+        $x:expr
+    ) => {
+        match $x {
+            Err(lmdb::MdbError::NotFound) => true,
+            _ => false
+        }
+    };
+}
+
 /// A TableClass describes the types of key/value and the behaviour (sort function) of a Table.
 pub trait TableClass: Sized {
     type Key: ToMdbValue + FromMdbValue;
@@ -145,6 +157,26 @@ impl<'table, D: TableDef> TypedCursor<'table, D> {
     }
 
     #[inline(always)]
+    pub fn to_key(&mut self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<()> {
+        self.cursor.to_key(key)
+    }
+
+    #[inline(always)]
+    pub fn to_gte_key(&mut self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<()> {
+        self.cursor.to_gte_key(key)
+    }
+
+    #[inline(always)]
+    pub fn to_next_key(&mut self) -> MdbResult<()> {
+        self.cursor.to_next_key()
+    }
+
+    #[inline(always)]
+    pub fn to_prev_key(&mut self) -> MdbResult<()> {
+        self.cursor.to_prev_key()
+    }
+
+    #[inline(always)]
     pub fn to_item(&mut self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
         self.cursor.to_item(key, value)
     }
@@ -216,7 +248,6 @@ extern "C" fn sort_reverse<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val:
 #[test]
 fn test_simple_table() {
     use std::path::Path;
-    use lmdb::MdbError;
 
     let env = lmdb::EnvBuilder::new().max_dbs(2).autocreate_dir(true).open(&Path::new("./test/db1"), 0o777).unwrap();
 
@@ -229,6 +260,7 @@ fn test_simple_table() {
         fn dbflags() -> lmdb::DbFlags {
             lmdb::core::DbIntKey | lmdb::core::DbAllowDups | lmdb::core::DbAllowIntDups | lmdb::core::DbDupFixed
         }
+
         // XXX: pass MdbResult back
         fn prepare_database(db: &lmdb::Database) {
             db.set_dupsort(sort_reverse::<Id64>).unwrap()
@@ -266,35 +298,27 @@ fn test_simple_table() {
 
         let key = 1u64;
 
-/*
-        let mut iter = db.item_iter(&key).unwrap();
+        let mut cursor = table.new_cursor().unwrap();
+        cursor.to_key(&1u64).unwrap(); //  positions on first item of key
+        assert_eq!((1u64, 200u64), cursor.get().unwrap());
 
-        let kv = iter.next().map(|c| c.get());
-        assert_eq!(Some((1u64, 200u64)), kv);
+        cursor.to_next_item().unwrap();
+        assert_eq!((1u64, 100u64), cursor.get().unwrap());
 
-        let kv = iter.next().map(|c| c.get());
-        assert_eq!(Some((1u64, 100u64)), kv);
+        cursor.to_next_item().unwrap();
+        assert_eq!((1u64, 3u64), cursor.get().unwrap());
 
-        let kv = iter.next().map(|c| c.get());
-        assert_eq!(Some((1u64, 3u64)), kv);
+        cursor.to_next_item().unwrap();
+        assert_eq!((1u64, 2u64), cursor.get().unwrap());
 
-        let kv = iter.next().map(|c| c.get());
-        assert_eq!(Some((1u64, 2u64)), kv);
+        cursor.to_next_item().unwrap();
+        assert_eq!((1u64, 1u64), cursor.get().unwrap());
 
-        let kv = iter.next().map(|c| c.get());
-        assert_eq!(Some((1u64, 1u64)), kv);
-
-        let kv: Option<(u64,u64)> = iter.next().map(|c| c.get());
-        assert_eq!(None, kv);
-*/
+        assert!(lmdb_not_found!(cursor.to_next_item()));
 
         let mut cursor = table.new_cursor().unwrap();
         {
-            let err = cursor.to_item(&2u64, &3u64);
-            match err {
-                Err(MdbError::NotFound) => assert!(true),
-                _ => assert!(false),
-            }
+            assert!(lmdb_not_found!(cursor.to_item(&2u64, &3u64)));
 
             cursor.to_item(&1u64, &3u64).unwrap();
             assert_eq!((1u64, 3u64), cursor.get().unwrap());
@@ -305,11 +329,7 @@ fn test_simple_table() {
             cursor.to_next_item().unwrap();
             assert_eq!((1u64, 1u64), cursor.get().unwrap());
  
-            let err = cursor.to_next_item();
-            match err {
-                Err(MdbError::NotFound) => assert!(true),
-                _ => assert!(false),
-            }
+            assert!(lmdb_not_found!(cursor.to_next_item()));
         }
     }
 }
