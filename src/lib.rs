@@ -40,7 +40,7 @@ pub trait TableClass: Sized {
     fn dbflags() -> DbFlags;
 
     /// Is called before accessing a database. Used to setup custom sort functions etc. 
-    fn prepare_database(db: &Database);
+    fn prepare_database(db: &Database) -> MdbResult<()>;
 }
 
 /// A TableDef is a concrete instance of a TableClass with a given table name.
@@ -78,25 +78,26 @@ impl<D: TableDef> TableHandle<D> {
     /// Bind a TableHandle towards a transaction. Returns a Table which you can use to
     /// modify the database.
     #[inline(always)]
-    pub fn bind_transaction<'txn>(&self, txn: &'txn Transaction) -> Table<'txn, D> {
+    pub fn bind_transaction<'txn>(&self, txn: &'txn Transaction) -> MdbResult<Table<'txn, D>> {
         let db = txn.bind(&self.dbh);
-        D::C::prepare_database(&db);
-        Table {
+        try!(D::C::prepare_database(&db));
+        Ok(Table {
             db: db,
             tabledef: PhantomData,
-        } 
+        })
     }
 
     /// Bind a TableHandle towards a readonly transaction.
     /// XXX: This should return a ReadonlyTable?
     #[inline(always)]
-    pub fn bind_reader<'txn>(&self, txn: &'txn ReadonlyTransaction) -> Table<'txn, D> {
+    pub fn bind_reader<'txn>(&self, txn: &'txn ReadonlyTransaction) -> MdbResult<Table<'txn, D>> {
         let db = txn.bind(&self.dbh);
-        D::C::prepare_database(&db);
-        Table {
-            db: db,
-            tabledef: PhantomData,
-        } 
+        try!(D::C::prepare_database(&db));
+        Ok(Table {
+                db: db,
+                tabledef: PhantomData,
+            } 
+        )
     }
 
 }
@@ -245,29 +246,59 @@ extern "C" fn sort_reverse<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val:
     order as lmdb::c_int
 }
 
+pub mod table_classes {
+    use super::{TableClass};
+    use super::lmdb::{self, Database, DbFlags};
+    use super::lmdb::core::{MdbResult, DbIntKey, DbAllowDups, DbAllowIntDups, DbDupFixed};
+    use super::{sort, sort_reverse};
+
+    /// CREATE TABLE (a: u64, b: u64, UNIQUE (a ASC, b ASC))
+    pub struct Unique__u64_u64;
+
+    impl TableClass for Unique__u64_u64 {
+        type Key = u64;
+        type Value = u64;
+
+        fn dbflags() -> DbFlags {
+            use ::std::mem;
+            assert!(mem::size_of::<Self::Key>() == mem::size_of::<usize>());
+            assert!(mem::size_of::<Self::Value>() == mem::size_of::<usize>());
+            DbIntKey | DbAllowDups | DbAllowIntDups | DbDupFixed
+        }
+
+        // Uses default sort order for both key and value
+        fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
+    }
+
+    /// CREATE TABLE (a: u64, b: u64, UNIQUE (a ASC, b DESC))
+    pub struct Unique__u64_u64rev;
+
+    impl super::TableClass for Unique__u64_u64rev {
+        type Key = u64;
+        type Value = u64;
+
+        fn dbflags() -> DbFlags {
+            use ::std::mem;
+            assert!(mem::size_of::<Self::Key>() == mem::size_of::<usize>());
+            assert!(mem::size_of::<Self::Value>() == mem::size_of::<usize>());
+            DbIntKey | DbAllowDups | DbAllowIntDups | DbDupFixed
+        }
+
+        // Uses reverse sort order for value, default for key.
+        fn prepare_database(db: &Database) -> MdbResult<()> {
+            db.set_dupsort(sort_reverse::<Self::Value>)
+        }
+    }
+}
+
+
 #[test]
 fn test_simple_table() {
     use std::path::Path;
 
     let env = lmdb::EnvBuilder::new().max_dbs(2).autocreate_dir(true).open(&Path::new("./test/db1"), 0o777).unwrap();
 
-    type Id64 = u64;
-    struct SortedSet_Id64_Id64Rev;
-    impl TableClass for SortedSet_Id64_Id64Rev {
-        type Key = Id64;
-        type Value = Id64;
-
-        fn dbflags() -> lmdb::DbFlags {
-            lmdb::core::DbIntKey | lmdb::core::DbAllowDups | lmdb::core::DbAllowIntDups | lmdb::core::DbDupFixed
-        }
-
-        // XXX: pass MdbResult back
-        fn prepare_database(db: &lmdb::Database) {
-            db.set_dupsort(sort_reverse::<Id64>).unwrap()
-        }
-    }
-
-    table_def!(MyFirstTable, SortedSet_Id64_Id64Rev, "my_first_table");
+    table_def!(MyFirstTable, table_classes::Unique__u64_u64rev, "my_first_table");
 
     // A Unique(Id64, Id64 DESC) table
     let table_handle = MyFirstTable::create_table(&env).unwrap();
@@ -276,7 +307,7 @@ fn test_simple_table() {
     {
         let txn = env.new_transaction().unwrap();
         {
-            let table = table_handle.bind_transaction(&txn); 
+            let table = table_handle.bind_transaction(&txn).unwrap(); 
             let key = 1u64;
             table.set(&key, &200u64).unwrap();
             table.set(&key, &100u64).unwrap();
@@ -294,7 +325,7 @@ fn test_simple_table() {
     // read
     {
         let rdr = env.get_reader().unwrap();
-        let table = table_handle.bind_reader(&rdr);
+        let table = table_handle.bind_reader(&rdr).unwrap();
 
         let key = 1u64;
 
