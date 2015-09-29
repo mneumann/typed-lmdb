@@ -418,22 +418,23 @@ fn test_simple_table() {
             let blobs = blobs_handle.bind_transaction(&txn).unwrap();
 
             let big_blob: &[u8] = b"Test";
-            blobs.set(&1u64, &big_blob);
+            blobs.set(&1, &big_blob);
 
-            let back: &[u8] = blobs.get(&1u64).unwrap();
+            let back: &[u8] = blobs.get(&1).unwrap();
             assert_eq!(&back[..], &b"Test"[..]);
 
-            let key = 1u64;
-            table.set(&key, &200u64).unwrap();
-            table.set(&key, &100u64).unwrap();
-            table.set(&key, &2u64).unwrap();
-            table.set(&key, &2u64).unwrap();
-            table.set(&key, &2u64).unwrap();
-            table.set(&key, &2u64).unwrap();
-            table.set(&key, &1u64).unwrap();
-            table.set(&key, &2u64).unwrap();
-            table.set(&key, &3u64).unwrap();
-            table.set(&key, &100u64).unwrap();
+            let key = 1;
+            table.set(&key, &200).unwrap();
+            table.set(&key, &200).unwrap();
+            table.set(&key, &100).unwrap();
+            table.set(&key, &2).unwrap();
+            table.set(&key, &2).unwrap();
+            table.set(&key, &2).unwrap();
+            table.set(&key, &2).unwrap();
+            table.set(&key, &1).unwrap();
+            table.set(&key, &2).unwrap();
+            table.set(&key, &3).unwrap();
+            table.set(&key, &100).unwrap();
         }
         txn.commit().unwrap();
     }
@@ -442,38 +443,36 @@ fn test_simple_table() {
         let rdr = env.get_reader().unwrap();
         let table = table_handle.bind_reader(&rdr).unwrap();
 
-        let key = 1u64;
-
         let mut cursor = table.new_cursor().unwrap();
-        cursor.to_key(&1u64).unwrap(); //  positions on first item of key
-        assert_eq!((1u64, 200u64), cursor.get().unwrap());
+        cursor.to_key(&1).unwrap(); //  positions on first item of key
+        assert_eq!((1, 200), cursor.get().unwrap());
 
         cursor.to_next_item().unwrap();
-        assert_eq!((1u64, 100u64), cursor.get().unwrap());
+        assert_eq!((1, 100), cursor.get().unwrap());
 
         cursor.to_next_item().unwrap();
-        assert_eq!((1u64, 3u64), cursor.get().unwrap());
+        assert_eq!((1, 3), cursor.get().unwrap());
 
         cursor.to_next_item().unwrap();
-        assert_eq!((1u64, 2u64), cursor.get().unwrap());
+        assert_eq!((1, 2), cursor.get().unwrap());
 
         cursor.to_next_item().unwrap();
-        assert_eq!((1u64, 1u64), cursor.get().unwrap());
+        assert_eq!((1, 1), cursor.get().unwrap());
 
         assert!(lmdb_not_found!(cursor.to_next_item()));
 
         let mut cursor = table.new_cursor().unwrap();
         {
-            assert!(lmdb_not_found!(cursor.to_item(&2u64, &3u64)));
+            assert!(lmdb_not_found!(cursor.to_item(&2, &3)));
 
-            cursor.to_item(&1u64, &3u64).unwrap();
-            assert_eq!((1u64, 3u64), cursor.get().unwrap());
+            cursor.to_item(&1, &3).unwrap();
+            assert_eq!((1, 3), cursor.get().unwrap());
 
             cursor.to_next_item().unwrap();
-            assert_eq!((1u64, 2u64), cursor.get().unwrap());
+            assert_eq!((1, 2), cursor.get().unwrap());
        
             cursor.to_next_item().unwrap();
-            assert_eq!((1u64, 1u64), cursor.get().unwrap());
+            assert_eq!((1, 1), cursor.get().unwrap());
  
             assert!(lmdb_not_found!(cursor.to_next_item()));
         }
