@@ -248,13 +248,62 @@ extern "C" fn sort_reverse<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val:
 
 pub mod table_classes {
     use super::{TableClass};
-    use super::lmdb::{self, Database, DbFlags};
+    use super::lmdb::{self, Database, DbFlags, FromMdbValue, ToMdbValue, MdbValue};
     use super::lmdb::core::{MdbResult, DbIntKey, DbAllowDups, DbAllowIntDups, DbDupFixed};
     use super::{sort, sort_reverse};
+    use ::std::mem;
 
     pub type Id64 = u64;
+    pub type Idx16 = u16;
 
-    /// CREATE TABLE (a: Id64, b: Id64, UNIQUE (a ASC, b ASC))
+    #[repr(C, packed)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+    pub struct Id64x2(pub Id64, pub Id64);
+
+    impl FromMdbValue for Id64x2 {
+        #[inline(always)]
+        fn from_mdb_value(value: &MdbValue) -> Id64x2 {
+            assert!(value.get_size() == mem::size_of::<Id64x2>());
+            unsafe {
+                let ptr: *const Id64x2 = value.get_ref() as *const Id64x2;
+                return *ptr;
+            }
+        }
+    }
+
+    impl ToMdbValue for Id64x2 {
+        fn to_mdb_value<'a>(&'a self) -> MdbValue<'a> {
+            unsafe {
+                MdbValue::new(mem::transmute(self as *const Id64x2), mem::size_of::<Id64x2>())
+            }
+        }
+    }
+
+    #[repr(C, packed)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+    pub struct Idx16Id64(pub Idx16, pub Id64);
+
+    impl FromMdbValue for Idx16Id64 {
+        #[inline(always)]
+        fn from_mdb_value(value: &MdbValue) -> Idx16Id64 {
+            assert!(value.get_size() == mem::size_of::<Idx16Id64>());
+            unsafe {
+                let ptr: *const Idx16Id64 = value.get_ref() as *const Idx16Id64;
+                return *ptr;
+            }
+        }
+    }
+
+    impl ToMdbValue for Idx16Id64 {
+        fn to_mdb_value<'a>(&'a self) -> MdbValue<'a> {
+            unsafe {
+                MdbValue::new(mem::transmute(self as *const Idx16Id64), mem::size_of::<Idx16Id64>())
+            }
+        }
+    }
+
+
+    /// CREATE TABLE (key: Id64, val: Id64, UNIQUE (key ASC, val ASC))
     pub struct Unique__Id64_Id64;
 
     impl TableClass for Unique__Id64_Id64 {
@@ -262,7 +311,6 @@ pub mod table_classes {
         type Value = Id64;
 
         fn dbflags() -> DbFlags {
-            use ::std::mem;
             assert!(mem::size_of::<Self::Key>() == mem::size_of::<usize>());
             assert!(mem::size_of::<Self::Value>() == mem::size_of::<usize>());
             DbIntKey | DbAllowDups | DbAllowIntDups | DbDupFixed
@@ -272,7 +320,7 @@ pub mod table_classes {
         fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
     }
 
-    /// CREATE TABLE (a: Id64, b: Id64, UNIQUE (a ASC, b DESC))
+    /// CREATE TABLE (key: Id64, val: Id64, UNIQUE (key ASC, val DESC))
     pub struct Unique__Id64_Id64Rev;
 
     impl super::TableClass for Unique__Id64_Id64Rev {
@@ -291,6 +339,25 @@ pub mod table_classes {
             db.set_dupsort(sort_reverse::<Self::Value>)
         }
     }
+
+    /// CREATE TABLE (key: (Id64, Id64), val: Id64, UNIQUE (key ASC, val ASC))
+    pub struct Unique__Id64x2_Id64;
+
+    impl TableClass for Unique__Id64x2_Id64 {
+        type Key = Id64x2;
+        type Value = Id64;
+
+        fn dbflags() -> DbFlags {
+            assert!(mem::size_of::<Self::Value>() == mem::size_of::<usize>());
+            DbAllowDups | DbAllowIntDups | DbDupFixed
+        }
+
+        // Uses default sort order for both key and value
+        fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
+    }
+
+
+
 }
 
 
