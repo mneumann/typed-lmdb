@@ -102,6 +102,26 @@ impl<'db, D: TableDef> Table<'db, D> {
     }
 
     #[inline(always)]
+    pub fn insert(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+        self.db.insert(key, value)
+    }
+
+    #[inline(always)]
+    pub fn get(&self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<<<D as TableDef>::C as TableClass>::Value> {
+        self.db.get(key)
+    }
+
+    #[inline(always)]
+    pub fn del(&self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<()> {
+        self.db.del(key)
+    }
+
+    #[inline(always)]
+    pub fn del_item(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+        self.db.del_item(key, value)
+    }
+
+    #[inline(always)]
     pub fn new_cursor<'table>(&'table self) -> MdbResult<TypedCursor<'table, D>> {
         self.db.new_cursor().map(|c| TypedCursor {cursor: c, tabledef: PhantomData})
     }
@@ -115,8 +135,28 @@ pub struct TypedCursor<'table, D: TableDef> {
 
 impl<'table, D: TableDef> TypedCursor<'table, D> {
     #[inline(always)]
+    pub fn to_first(&mut self) -> MdbResult<()> {
+        self.cursor.to_first()
+    }
+
+    #[inline(always)]
+    pub fn to_last(&mut self) -> MdbResult<()> {
+        self.cursor.to_last()
+    }
+
+    #[inline(always)]
     pub fn to_item(&mut self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
         self.cursor.to_item(key, value)
+    }
+
+    #[inline(always)]
+    pub fn to_first_item(&mut self) -> MdbResult<()> {
+        self.cursor.to_first_item()
+    }
+
+    #[inline(always)]
+    pub fn to_last_item(&mut self) -> MdbResult<()> {
+        self.cursor.to_last_item()
     }
 
     #[inline(always)]
@@ -125,9 +165,37 @@ impl<'table, D: TableDef> TypedCursor<'table, D> {
     }
 
     #[inline(always)]
+    pub fn to_prev_item(&mut self) -> MdbResult<()> {
+        self.cursor.to_prev_item()
+    }
+
+    #[inline(always)]
+    pub fn item_count(&mut self) -> MdbResult<u64> {
+        self.cursor.item_count()
+    }
+
+    #[inline(always)]
     pub fn get<'a>(&'a mut self) -> MdbResult<(<<D as TableDef>::C as TableClass>::Key, <<D as TableDef>::C as TableClass>::Value)> /*where D::C::Key: 'a, D::C::Value: 'a*/ {
         self.cursor.get()
     }
+
+    #[inline(always)]
+    pub fn get_value<'a>(&'a mut self) -> MdbResult<<<D as TableDef>::C as TableClass>::Value> {
+        self.cursor.get_value()
+    }
+
+    #[inline(always)]
+    pub fn get_key<'a>(&'a mut self) -> MdbResult<<<D as TableDef>::C as TableClass>::Key> {
+        self.cursor.get_key()
+    }
+
+    #[inline(always)]
+    pub fn replace(&mut self, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+        self.cursor.replace(value)
+    }
+
+
+
 }
 
 extern "C" fn sort<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val: *const MDB_val) -> lmdb::c_int {
@@ -152,8 +220,6 @@ fn test_simple_table() {
 
     let env = lmdb::EnvBuilder::new().max_dbs(2).autocreate_dir(true).open(&Path::new("./test/db1"), 0o777).unwrap();
 
-    //def_tablename!(MyfirstTable_TableName as "myfirst_table");
-
     type Id64 = u64;
     struct SortedSet_Id64_Id64Rev;
     impl TableClass for SortedSet_Id64_Id64Rev {
@@ -170,16 +236,6 @@ fn test_simple_table() {
     }
 
     table_def!(MyFirstTable, SortedSet_Id64_Id64Rev, "my_first_table");
-
-/*
-    struct MyFirstTable;
-    impl TableDef for MyFirstTable {
-        // The TableClass
-        type C = SortedSet_Id64_Id64Rev;
-
-        fn table_name() -> &'static str { "my_first_table" }
-    }
-*/
 
     // A Unique(Id64, Id64 DESC) table
     let table_handle = MyFirstTable::create_table(&env).unwrap();
@@ -234,6 +290,12 @@ fn test_simple_table() {
 
         let mut cursor = table.new_cursor().unwrap();
         {
+            let err = cursor.to_item(&2u64, &3u64);
+            match err {
+                Err(MdbError::NotFound) => assert!(true),
+                _ => assert!(false),
+            }
+
             cursor.to_item(&1u64, &3u64).unwrap();
             assert_eq!((1u64, 3u64), cursor.get().unwrap());
 
