@@ -5,20 +5,16 @@ use lmdb::{FromMdbValue, ToMdbValue, MdbValue, DbFlags, DbHandle, Database, Envi
 use lmdb::core::MdbResult;
 use std::marker::PhantomData;
 
-/// For encoding the name of the Table in the type system.
-pub trait TableName {
-    fn as_str() -> &'static str;
-}
-
 #[macro_export]
-macro_rules! def_tablename {
+macro_rules! table_def {
     (
-        $structname:ident as $str:expr
+        $structname:ident, $tableclass:ty, $str:expr
     ) => {
         #[derive(Clone)]
         struct $structname;
-        impl TableName for $structname {
-            fn as_str() -> &'static str { $str }
+        impl TableDef for $structname {
+            type C = $tableclass; 
+            fn table_name() -> &'static str { $str }
         }
     };
 }
@@ -33,93 +29,93 @@ pub trait TableClass: Sized {
 
     /// Is called before accessing a database. Used to setup custom sort functions etc. 
     fn prepare_database(db: &Database);
-
-    fn create_table<N: TableName>(env: &Environment) -> MdbResult<TableHandle<Self, N>> {
-        env.create_db(N::as_str(), Self::dbflags()).map(|dbh| {
-            TableHandle {
-                dbh: dbh,
-                tableclass: PhantomData,
-                tablename: PhantomData
-            }
-        })
-    }
-
-    fn open_table<N: TableName>(env: &Environment) -> MdbResult<TableHandle<Self, N>> {
-        env.get_db(N::as_str(), Self::dbflags()).map(|dbh| {
-            TableHandle {
-                dbh: dbh,
-                tableclass: PhantomData,
-                tablename: PhantomData
-            }
-        })
-    }
 }
 
-/// Wraps a lmdb::DbHandle, keeping the TableClass and TableName in the type signature.
-pub struct TableHandle<C: TableClass, N: TableName> {
+/// A TableDef is a concrete instance of a TableClass with a given table name.
+pub trait TableDef: Sized {
+    type C: TableClass;
+    fn table_name() -> &'static str;
+
+    fn create_table(env: &Environment) -> MdbResult<TableHandle<Self>> {
+        env.create_db(Self::table_name(), Self::C::dbflags()).map(|dbh| {
+            TableHandle {
+                dbh: dbh,
+                tabledef: PhantomData,
+            }
+        })
+    }
+
+    fn open_table(env: &Environment) -> MdbResult<TableHandle<Self>> {
+        env.get_db(Self::table_name(), Self::C::dbflags()).map(|dbh| {
+            TableHandle {
+                dbh: dbh,
+                tabledef: PhantomData,
+            }
+        })
+    }
+
+}
+
+/// Wraps a lmdb::DbHandle, keeping the TableDef in the type signature.
+pub struct TableHandle<D: TableDef> {
     dbh: DbHandle,
-    tableclass: PhantomData<C>,
-    tablename: PhantomData<N>,
+    tabledef: PhantomData<D>,
 }
 
-impl<C: TableClass, N: TableName> TableHandle<C, N> {
+impl<D: TableDef> TableHandle<D> {
     /// Bind a TableHandle towards a transaction. Returns a Table which you can use to
     /// modify the database.
     #[inline(always)]
-    pub fn bind_transaction<'txn>(&self, txn: &'txn Transaction) -> Table<'txn, C, N> {
+    pub fn bind_transaction<'txn>(&self, txn: &'txn Transaction) -> Table<'txn, D> {
         let db = txn.bind(&self.dbh);
-        C::prepare_database(&db);
+        D::C::prepare_database(&db);
         Table {
             db: db,
-            tableclass: PhantomData,
-            tablename: PhantomData
+            tabledef: PhantomData,
         } 
     }
 
     /// Bind a TableHandle towards a readonly transaction.
     /// XXX: This should return a ReadonlyTable?
     #[inline(always)]
-    pub fn bind_reader<'txn>(&self, txn: &'txn ReadonlyTransaction) -> Table<'txn, C, N> {
+    pub fn bind_reader<'txn>(&self, txn: &'txn ReadonlyTransaction) -> Table<'txn, D> {
         let db = txn.bind(&self.dbh);
-        C::prepare_database(&db);
+        D::C::prepare_database(&db);
         Table {
             db: db,
-            tableclass: PhantomData,
-            tablename: PhantomData
+            tabledef: PhantomData,
         } 
     }
 
 }
 
-/// Wraps a lmdb::Database, keeping the TableClass and TableName in the type signature.
-pub struct Table<'db, C: TableClass, N: TableName> {
+/// Wraps a lmdb::Database, keeping the TableDef in the type signature.
+pub struct Table<'db, D: TableDef> {
     db: Database<'db>,
-    tableclass: PhantomData<C>,
-    tablename: PhantomData<N>,
+    tabledef: PhantomData<D>,
 }
 
-impl<'db, C: TableClass, N: TableName> Table<'db, C, N> {
+impl<'db, D: TableDef> Table<'db, D> {
     #[inline(always)]
-    pub fn set(&self, key: &C::Key, value: &C::Value) -> MdbResult<()> {
+    pub fn set(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
         self.db.set(key, value)
     }
 
     #[inline(always)]
-    pub fn new_cursor<'table>(&'table self) -> MdbResult<TypedCursor<'table, C, N>> {
-        self.db.new_cursor().map(|c| TypedCursor {cursor: c, tableclass: PhantomData, tablename: PhantomData})
+    pub fn new_cursor<'table>(&'table self) -> MdbResult<TypedCursor<'table, D>> {
+        self.db.new_cursor().map(|c| TypedCursor {cursor: c, tabledef: PhantomData})
     }
 }
 
 /// Is a typed version of lmdb::Cursor.
-pub struct TypedCursor<'table, C: TableClass, N: TableName> {
+pub struct TypedCursor<'table, D: TableDef> {
     cursor: Cursor<'table>,
-    tableclass: PhantomData<C>,
-    tablename: PhantomData<N>,
+    tabledef: PhantomData<D>,
 }
 
-impl<'table, C: TableClass, N: TableName> TypedCursor<'table, C, N> {
+impl<'table, D: TableDef> TypedCursor<'table, D> {
     #[inline(always)]
-    pub fn to_item(&mut self, key: &C::Key, value: &C::Value) -> MdbResult<()> {
+    pub fn to_item(&mut self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
         self.cursor.to_item(key, value)
     }
 
@@ -129,7 +125,7 @@ impl<'table, C: TableClass, N: TableName> TypedCursor<'table, C, N> {
     }
 
     #[inline(always)]
-    pub fn get<'a>(&'a mut self) -> MdbResult<(C::Key, C::Value)> where C::Key: 'a, C::Value: 'a {
+    pub fn get<'a>(&'a mut self) -> MdbResult<(<<D as TableDef>::C as TableClass>::Key, <<D as TableDef>::C as TableClass>::Value)> /*where D::C::Key: 'a, D::C::Value: 'a*/ {
         self.cursor.get()
     }
 }
@@ -156,7 +152,7 @@ fn test_simple_table() {
 
     let env = lmdb::EnvBuilder::new().max_dbs(2).autocreate_dir(true).open(&Path::new("./test/db1"), 0o777).unwrap();
 
-    def_tablename!(MyfirstTable_TableName as "myfirst_table");
+    //def_tablename!(MyfirstTable_TableName as "myfirst_table");
 
     type Id64 = u64;
     struct SortedSet_Id64_Id64Rev;
@@ -173,8 +169,20 @@ fn test_simple_table() {
         }
     }
 
+    table_def!(MyFirstTable, SortedSet_Id64_Id64Rev, "my_first_table");
+
+/*
+    struct MyFirstTable;
+    impl TableDef for MyFirstTable {
+        // The TableClass
+        type C = SortedSet_Id64_Id64Rev;
+
+        fn table_name() -> &'static str { "my_first_table" }
+    }
+*/
+
     // A Unique(Id64, Id64 DESC) table
-    let table_handle = SortedSet_Id64_Id64Rev::create_table::<MyfirstTable_TableName>(&env).unwrap();
+    let table_handle = MyFirstTable::create_table(&env).unwrap();
 
     // prepare database
     {
