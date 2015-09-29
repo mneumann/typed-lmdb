@@ -10,7 +10,6 @@ macro_rules! table_def {
     (
         $structname:ident, $tableclass:ty, $str:expr
     ) => {
-        #[derive(Clone)]
         struct $structname;
         impl TableDef for $structname {
             type C = $tableclass; 
@@ -251,13 +250,18 @@ pub mod table_classes {
     use super::lmdb::{self, Database, DbFlags, FromMdbValue, ToMdbValue, MdbValue};
     use super::lmdb::core::{MdbResult, DbIntKey, DbAllowDups, DbAllowIntDups, DbDupFixed};
     use super::{sort, sort_reverse};
-    use ::std::mem;
+    use std::mem;
+    use std::marker::PhantomData;
 
+    /// 64-bit id type 
     pub type Id64 = u64;
+
+    /// 16-bit index type
     pub type Idx16 = u16;
 
     #[repr(C, packed)]
     #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+    /// A (Id64, Id64) tuple type
     pub struct Id64x2(pub Id64, pub Id64);
 
     impl FromMdbValue for Id64x2 {
@@ -356,6 +360,26 @@ pub mod table_classes {
         fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
     }
 
+    pub type Blob<'a> = &'a [u8];
+
+    /// CREATE TABLE (key: Id64, val: BLOB, UNIQUE (key ASC))
+    pub struct UniqueKey__Id64_Blob<'a> {
+        marker: PhantomData<&'a()>,
+    }
+
+    impl<'a> TableClass for UniqueKey__Id64_Blob<'a> {
+        type Key = Id64;
+        type Value = Blob<'a>;
+
+        fn dbflags() -> DbFlags {
+            assert!(mem::size_of::<Self::Key>() == mem::size_of::<usize>());
+            DbIntKey
+        }
+
+        // Uses default sort order for both key and value
+        fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
+    }
+
 
 
 }
@@ -369,14 +393,30 @@ fn test_simple_table() {
 
     table_def!(MyFirstTable, table_classes::Unique__Id64_Id64Rev, "my_first_table");
 
+    struct MyBlobTable<'a>(PhantomData<&'a()>);
+    impl<'a> TableDef for MyBlobTable<'a> {
+        type C = table_classes::UniqueKey__Id64_Blob<'a>;
+        fn table_name() -> &'static str { "my_blob_table" }
+    }
+
     // A Unique(Id64, Id64 DESC) table
     let table_handle = MyFirstTable::create_table(&env).unwrap();
+
+    let blobs_handle = MyBlobTable::create_table(&env).unwrap();
 
     // prepare database
     {
         let txn = env.new_transaction().unwrap();
         {
             let table = table_handle.bind_transaction(&txn).unwrap(); 
+            let blobs = blobs_handle.bind_transaction(&txn).unwrap();
+
+            let big_blob: &[u8] = b"Test";
+            blobs.set(&1u64, &big_blob);
+
+            let back: &[u8] = blobs.get(&1u64).unwrap();
+            assert_eq!(&back[..], &b"Test"[..]);
+
             let key = 1u64;
             table.set(&key, &200u64).unwrap();
             table.set(&key, &100u64).unwrap();
