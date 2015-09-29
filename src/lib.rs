@@ -1,4 +1,3 @@
-#![feature(associated_consts)]
 extern crate lmdb_rs as lmdb;
 
 use lmdb::{FromMdbValue, ToMdbValue, MdbValue, DbFlags, DbHandle, Database, Environment, Transaction, ReadonlyTransaction, Cursor, MDB_val};
@@ -12,6 +11,19 @@ macro_rules! table_def {
     ) => {
         struct $structname;
         impl TableDef for $structname {
+            type C = $tableclass; 
+            fn table_name() -> &'static str { $str }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! table_def_lifetime {
+    (
+        $structname:ident, $tableclass:ty, $str:expr
+    ) => {
+        struct $structname<'a> {marker: PhantomData<&'a()>}
+        impl<'a> TableDef for $structname<'a> {
             type C = $tableclass; 
             fn table_name() -> &'static str { $str }
         }
@@ -327,7 +339,7 @@ pub mod table_classes {
     /// CREATE TABLE (key: Id64, val: Id64, UNIQUE (key ASC, val DESC))
     pub struct Unique__Id64_Id64Rev;
 
-    impl super::TableClass for Unique__Id64_Id64Rev {
+    impl TableClass for Unique__Id64_Id64Rev {
         type Key = Id64;
         type Value = Id64;
 
@@ -391,17 +403,11 @@ fn test_simple_table() {
 
     let env = lmdb::EnvBuilder::new().max_dbs(2).autocreate_dir(true).open(&Path::new("./test/db1"), 0o777).unwrap();
 
-    table_def!(MyFirstTable, table_classes::Unique__Id64_Id64Rev, "my_first_table");
-
-    struct MyBlobTable<'a>(PhantomData<&'a()>);
-    impl<'a> TableDef for MyBlobTable<'a> {
-        type C = table_classes::UniqueKey__Id64_Blob<'a>;
-        fn table_name() -> &'static str { "my_blob_table" }
-    }
+    table_def!(MyFirstTable, table_classes::Unique__Id64_Id64Rev,             "my_first_table");
+    table_def_lifetime!(MyBlobTable, table_classes::UniqueKey__Id64_Blob<'a>, "my_blob_table");
 
     // A Unique(Id64, Id64 DESC) table
     let table_handle = MyFirstTable::create_table(&env).unwrap();
-
     let blobs_handle = MyBlobTable::create_table(&env).unwrap();
 
     // prepare database
