@@ -1,0 +1,7 @@
+[package]
+name = "typed-lmdb"
+version = "0.1.0"
+authors = ["Michael Neumann <mneumann@ntecs.de>"]
+
+[dependencies.lmdb-rs]
+git = "https://github.com/vhbit/lmdb-rs.git"
