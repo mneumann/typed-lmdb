@@ -143,6 +143,24 @@ impl<'db, D: TableDef> Table<'db, D> {
         self.db.insert(key, value)
     }
 
+    /// Checks if the item exists.
+    pub fn insert_item(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+        if try!(self.has_item(key, value)) {
+            return Err(lmdb::MdbError::KeyExists);
+        }
+        self.set(key, value)
+    }
+
+    /// Returns true if item exists.
+    pub fn has_item(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<bool> {
+        let mut cursor = try!(self.new_cursor());
+        match cursor.to_item(key, value) {
+            Ok(()) => Ok(true),
+            Err(lmdb::MdbError::NotFound) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
     #[inline(always)]
     pub fn get(&self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<<<D as TableDef>::C as TableClass>::Value> {
         self.db.get(key)
@@ -256,8 +274,25 @@ impl<'table, D: TableDef> TypedCursor<'table, D> {
         self.cursor.replace(value)
     }
 
+    #[inline(always)]
+    pub fn add_item(&mut self, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+        self.cursor.add_item(value)
+    }
 
+    #[inline(always)]
+    pub fn del(&mut self) -> MdbResult<()> {
+        self.cursor.del()
+    }
 
+    #[inline(always)]
+    pub fn del_item(&mut self) -> MdbResult<()> {
+        self.cursor.del_item()
+    }
+
+    #[inline(always)]
+    pub fn del_all(&mut self) -> MdbResult<()> {
+        self.cursor.del_all()
+    }
 }
 
 extern "C" fn sort<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val: *const MDB_val) -> lmdb::c_int {
