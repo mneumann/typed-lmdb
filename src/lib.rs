@@ -1,57 +1,9 @@
 extern crate lmdb_rs as lmdb;
 
-use lmdb::{FromMdbValue, ToMdbValue, MdbValue, DbFlags, DbHandle, Database, Environment, Transaction, ReadonlyTransaction, Cursor, MDB_val};
+use lmdb::{FromMdbValue, ToMdbValue, MdbValue,
+           DbFlags, DbHandle, Database, Environment, Cursor, MDB_val};
 use lmdb::core::MdbResult;
 use std::marker::PhantomData;
-
-#[macro_export]
-macro_rules! table_def {
-    (
-        pub $structname:ident, $tableclass:ty, $str:expr
-    ) => {
-        #[derive(Clone)]
-        pub struct $structname;
-        impl TableDef for $structname {
-            type C = $tableclass;
-            fn table_name() -> &'static str { $str }
-        }
-    };
-    (
-        $structname:ident, $tableclass:ty, $str:expr
-    ) => {
-        #[derive(Clone)]
-        struct $structname;
-        impl TableDef for $structname {
-            type C = $tableclass; 
-            fn table_name() -> &'static str { $str }
-        }
-    };
-
-}
-
-#[macro_export]
-macro_rules! table_def_lifetime {
-    (
-        pub $structname:ident, $tableclass:ty, $str:expr
-    ) => {
-        #[derive(Clone)]
-        pub struct $structname<'a> {marker: ::std::marker::PhantomData<&'a()>}
-        impl<'a> TableDef for $structname<'a> {
-            type C = $tableclass; 
-            fn table_name() -> &'static str { $str }
-        }
-    };
-    (
-        $structname:ident, $tableclass:ty, $str:expr
-    ) => {
-        #[derive(Clone)]
-        struct $structname<'a> {marker: ::std::marker::PhantomData<&'a()>}
-        impl<'a> TableDef for $structname<'a> {
-            type C = $tableclass; 
-            fn table_name() -> &'static str { $str }
-        }
-    };
-}
 
 #[macro_export]
 macro_rules! lmdb_not_found {
@@ -65,141 +17,86 @@ macro_rules! lmdb_not_found {
     };
 }
 
-/// A TableClass describes the types of key/value and the behaviour (sort function) of a Table.
-pub trait TableClass: Sized {
-    type Key: ToMdbValue + FromMdbValue;
-    type Value: ToMdbValue + FromMdbValue;
+/// Defines all neccessary information to create/open a database.
+pub trait TableDef {
+    fn name() -> &'static str;
+    fn flags() -> DbFlags;
+    fn setup(db: &Database) -> MdbResult<()>;
 
-    /// Flags used for creation/open
-    fn dbflags() -> DbFlags;
-
-    /// Is called before accessing a database. Used to setup custom sort functions etc. 
-    fn prepare_database(db: &Database) -> MdbResult<()>;
+    fn open(env: &Environment, create: bool) -> MdbResult<DbHandle> {
+        if create {
+            env.create_db(Self::name(), Self::flags())
+        } else {
+            env.get_db(Self::name(), Self::flags())
+        }
+    }
 }
 
-/// A TableDef is a concrete instance of a TableClass with a given table name.
-pub trait TableDef: Sized {
-    type C: TableClass;
-    fn table_name() -> &'static str;
-
-    fn create_table(env: &Environment) -> MdbResult<TableHandle<Self>> {
-        env.create_db(Self::table_name(), Self::C::dbflags()).map(|dbh| {
-            TableHandle {
-                dbh: dbh,
-                tabledef: PhantomData,
-            }
-        })
-    }
-
-    fn open_table(env: &Environment) -> MdbResult<TableHandle<Self>> {
-        env.get_db(Self::table_name(), Self::C::dbflags()).map(|dbh| {
-            TableHandle {
-                dbh: dbh,
-                tabledef: PhantomData,
-            }
-        })
-    }
-
-}
-
-/// Wraps a lmdb::DbHandle, keeping the TableDef in the type signature.
-#[derive(Clone)]
-pub struct TableHandle<D: TableDef> {
-    dbh: DbHandle,
-    tabledef: PhantomData<D>,
-}
-
-impl<D: TableDef> TableHandle<D> {
-    /// Bind a TableHandle towards a transaction. Returns a Table which you can use to
-    /// modify the database.
-    #[inline(always)]
-    pub fn bind_transaction<'txn>(&self, txn: &'txn Transaction) -> MdbResult<Table<'txn, D>> {
-        let db = txn.bind(&self.dbh);
-        try!(D::C::prepare_database(&db));
-        Ok(Table {
-            db: db,
-            tabledef: PhantomData,
-        })
-    }
-
-    /// Bind a TableHandle towards a readonly transaction.
-    /// XXX: This should return a ReadonlyTable?
-    #[inline(always)]
-    pub fn bind_reader<'txn>(&self, txn: &'txn ReadonlyTransaction) -> MdbResult<Table<'txn, D>> {
-        let db = txn.bind(&self.dbh);
-        try!(D::C::prepare_database(&db));
-        Ok(Table {
-                db: db,
-                tabledef: PhantomData,
-            } 
-        )
-    }
-
-}
-
-/// Wraps a lmdb::Database, keeping the TableDef in the type signature.
-pub struct Table<'db, D: TableDef> {
+/// Wraps a lmdb::Database, keeping type information for K and V.
+pub struct Table<'db, K, V> {
     db: Database<'db>,
-    tabledef: PhantomData<D>,
+    k: PhantomData<K>,
+    v: PhantomData<V>,
 }
 
-impl<'db, D: TableDef> Table<'db, D> {
+impl<'db, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> Table<'db, K, V> {
     #[inline(always)]
-    pub fn set(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn set(&self, key: &K, value: &V) -> MdbResult<()> {
         self.db.set(key, value)
     }
 
     #[inline(always)]
-    pub fn insert(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn insert(&self, key: &K, value: &V) -> MdbResult<()> {
         self.db.insert(key, value)
     }
 
     /// Checks if the item exists.
-    pub fn insert_item(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn insert_item(&self, key: &K, value: &V) -> MdbResult<()> {
         if try!(self.has_item(key, value)) {
-            return Err(lmdb::MdbError::KeyExists);
+            return Err(::lmdb::MdbError::KeyExists);
         }
         self.set(key, value)
     }
 
     /// Returns true if item exists.
-    pub fn has_item(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<bool> {
+    pub fn has_item(&self, key: &K, value: &V) -> MdbResult<bool> {
         let mut cursor = try!(self.new_cursor());
         match cursor.to_item(key, value) {
             Ok(()) => Ok(true),
-            Err(lmdb::MdbError::NotFound) => Ok(false),
+            Err(::lmdb::MdbError::NotFound) => Ok(false),
             Err(e) => Err(e),
         }
     }
 
     #[inline(always)]
-    pub fn get(&self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<<<D as TableDef>::C as TableClass>::Value> {
+    pub fn get(&self, key: &K) -> MdbResult<V> {
         self.db.get(key)
     }
 
     #[inline(always)]
-    pub fn del(&self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<()> {
+    pub fn del(&self, key: &K) -> MdbResult<()> {
         self.db.del(key)
     }
 
     #[inline(always)]
-    pub fn del_item(&self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn del_item(&self, key: &K, value: &V) -> MdbResult<()> {
         self.db.del_item(key, value)
     }
 
     #[inline(always)]
-    pub fn new_cursor<'table>(&'table self) -> MdbResult<TypedCursor<'table, D>> {
-        self.db.new_cursor().map(|c| TypedCursor {cursor: c, tabledef: PhantomData})
+    pub fn new_cursor<'table>(&'table self) -> MdbResult<TypedCursor<'table, K, V>> {
+        Ok(TypedCursor {cursor: try!(self.db.new_cursor()), k: PhantomData, v: PhantomData})
     }
 }
 
 /// Is a typed version of lmdb::Cursor.
-pub struct TypedCursor<'table, D: TableDef> {
+pub struct TypedCursor<'table, K, V> {
     cursor: Cursor<'table>,
-    tabledef: PhantomData<D>,
+    k: PhantomData<K>,
+    v: PhantomData<V>,
 }
 
-impl<'table, D: TableDef> TypedCursor<'table, D> {
+impl<'table, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> TypedCursor<'table, K, V> {
     #[inline(always)]
     pub fn to_first(&mut self) -> MdbResult<()> {
         self.cursor.to_first()
@@ -211,12 +108,12 @@ impl<'table, D: TableDef> TypedCursor<'table, D> {
     }
 
     #[inline(always)]
-    pub fn to_key(&mut self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<()> {
+    pub fn to_key(&mut self, key: &K) -> MdbResult<()> {
         self.cursor.to_key(key)
     }
 
     #[inline(always)]
-    pub fn to_gte_key(&mut self, key: &<<D as TableDef>::C as TableClass>::Key) -> MdbResult<()> {
+    pub fn to_gte_key(&mut self, key: &K) -> MdbResult<()> {
         self.cursor.to_gte_key(key)
     }
 
@@ -231,12 +128,12 @@ impl<'table, D: TableDef> TypedCursor<'table, D> {
     }
 
     #[inline(always)]
-    pub fn to_item(&mut self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn to_item(&mut self, key: &K, value: &V) -> MdbResult<()> {
         self.cursor.to_item(key, value)
     }
 
     #[inline(always)]
-    pub fn to_gte_item(&mut self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn to_gte_item(&mut self, key: &K, value: &V) -> MdbResult<()> {
         self.cursor.to_gte_item(key, value)
     }
 
@@ -266,27 +163,27 @@ impl<'table, D: TableDef> TypedCursor<'table, D> {
     }
 
     #[inline(always)]
-    pub fn get<'a>(&'a mut self) -> MdbResult<(<<D as TableDef>::C as TableClass>::Key, <<D as TableDef>::C as TableClass>::Value)> /*where D::C::Key: 'a, D::C::Value: 'a*/ {
+    pub fn get(&mut self) -> MdbResult<(K, V)> {
         self.cursor.get()
     }
 
     #[inline(always)]
-    pub fn get_value<'a>(&'a mut self) -> MdbResult<<<D as TableDef>::C as TableClass>::Value> {
+    pub fn get_value(&mut self) -> MdbResult<V> {
         self.cursor.get_value()
     }
 
     #[inline(always)]
-    pub fn get_key<'a>(&'a mut self) -> MdbResult<<<D as TableDef>::C as TableClass>::Key> {
+    pub fn get_key(&mut self) -> MdbResult<K> {
         self.cursor.get_key()
     }
 
     #[inline(always)]
-    pub fn replace(&mut self, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn replace(&mut self, value: &V) -> MdbResult<()> {
         self.cursor.replace(value)
     }
 
     #[inline(always)]
-    pub fn add_item(&mut self, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+    pub fn add_item(&mut self, value: &V) -> MdbResult<()> {
         self.cursor.add_item(value)
     }
 
@@ -321,164 +218,51 @@ extern "C" fn sort_reverse<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val:
     order as lmdb::c_int
 }
 
-pub mod table_classes {
-    use super::{TableClass};
-    use super::lmdb::{self, Database, DbFlags, FromMdbValue, ToMdbValue, MdbValue};
-    use super::lmdb::core::{MdbResult, DbIntKey, DbAllowDups, DbAllowIntDups, DbDupFixed};
-    use super::{sort, sort_reverse};
-    use std::mem;
-    use std::marker::PhantomData;
-
-    /// 64-bit id type 
-    pub type Id64 = u64;
-
-    /// 16-bit index type
-    pub type Idx16 = u16;
-
-    #[repr(C, packed)]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-    /// A (Id64, Id64) tuple type
-    pub struct Id64x2(pub Id64, pub Id64);
-
-    impl FromMdbValue for Id64x2 {
-        #[inline(always)]
-        fn from_mdb_value(value: &MdbValue) -> Id64x2 {
-            assert!(value.get_size() == mem::size_of::<Id64x2>());
-            unsafe {
-                let ptr: *const Id64x2 = value.get_ref() as *const Id64x2;
-                return *ptr;
-            }
-        }
-    }
-
-    impl ToMdbValue for Id64x2 {
-        fn to_mdb_value<'a>(&'a self) -> MdbValue<'a> {
-            unsafe {
-                MdbValue::new(mem::transmute(self as *const Id64x2), mem::size_of::<Id64x2>())
-            }
-        }
-    }
-
-    #[repr(C, packed)]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-    pub struct Idx16Id64(pub Idx16, pub Id64);
-
-    impl FromMdbValue for Idx16Id64 {
-        #[inline(always)]
-        fn from_mdb_value(value: &MdbValue) -> Idx16Id64 {
-            assert!(value.get_size() == mem::size_of::<Idx16Id64>());
-            unsafe {
-                let ptr: *const Idx16Id64 = value.get_ref() as *const Idx16Id64;
-                return *ptr;
-            }
-        }
-    }
-
-    impl ToMdbValue for Idx16Id64 {
-        fn to_mdb_value<'a>(&'a self) -> MdbValue<'a> {
-            unsafe {
-                MdbValue::new(mem::transmute(self as *const Idx16Id64), mem::size_of::<Idx16Id64>())
-            }
-        }
-    }
-
-    /// CREATE TABLE (key: Id64, val: Id64, UNIQUE (key ASC, val ASC))
-    pub struct Unique__Id64_Id64;
-
-    impl TableClass for Unique__Id64_Id64 {
-        type Key = Id64;
-        type Value = Id64;
-
-        fn dbflags() -> DbFlags {
-            assert!(mem::size_of::<Self::Key>() == mem::size_of::<usize>());
-            assert!(mem::size_of::<Self::Value>() == mem::size_of::<usize>());
-            DbIntKey | DbAllowDups | DbAllowIntDups | DbDupFixed
-        }
-
-        // Uses default sort order for both key and value
-        fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
-    }
-
-    /// CREATE TABLE (key: Id64, val: Id64, UNIQUE (key ASC, val DESC))
-    pub struct Unique__Id64_Id64Rev;
-
-    impl TableClass for Unique__Id64_Id64Rev {
-        type Key = Id64;
-        type Value = Id64;
-
-        fn dbflags() -> DbFlags {
-            use ::std::mem;
-            assert!(mem::size_of::<Self::Key>() == mem::size_of::<usize>());
-            assert!(mem::size_of::<Self::Value>() == mem::size_of::<usize>());
-            DbIntKey | DbAllowDups | DbAllowIntDups | DbDupFixed
-        }
-
-        // Uses reverse sort order for value, default for key.
-        fn prepare_database(db: &Database) -> MdbResult<()> {
-            db.set_dupsort(sort_reverse::<Self::Value>)
-        }
-    }
-
-    /// CREATE TABLE (key: (Id64, Id64), val: Id64, UNIQUE (key ASC, val ASC))
-    pub struct Unique__Id64x2_Id64;
-
-    impl TableClass for Unique__Id64x2_Id64 {
-        type Key = Id64x2;
-        type Value = Id64;
-
-        fn dbflags() -> DbFlags {
-            assert!(mem::size_of::<Self::Value>() == mem::size_of::<usize>());
-            DbAllowDups | DbAllowIntDups | DbDupFixed
-        }
-
-        // Uses default sort order for both key and value
-        fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
-    }
-
-    pub type Blob<'a> = &'a [u8];
-
-    /// CREATE TABLE (key: Id64, val: BLOB, UNIQUE (key ASC))
-    pub struct UniqueKey__Id64_Blob<'a> {
-        marker: PhantomData<&'a()>,
-    }
-
-    impl<'a> TableClass for UniqueKey__Id64_Blob<'a> {
-        type Key = Id64;
-        type Value = Blob<'a>;
-
-        fn dbflags() -> DbFlags {
-            assert!(mem::size_of::<Self::Key>() == mem::size_of::<usize>());
-            DbIntKey
-        }
-
-        // Uses default sort order for both key and value
-        fn prepare_database(_db: &Database) -> MdbResult<()> { Ok(()) }
-    }
-
-
-
-}
-
-
 #[test]
 fn test_simple_table() {
     use std::path::Path;
+    use lmdb::core::{DbIntKey, DbAllowDups, DbAllowIntDups, DbDupFixed};
 
     let env = lmdb::EnvBuilder::new().max_dbs(2).autocreate_dir(true).open(&Path::new("./test/db1"), 0o777).unwrap();
 
-    table_def!(MyFirstTable, table_classes::Unique__Id64_Id64Rev,             "my_first_table");
-    table_def_lifetime!(MyBlobTable, table_classes::UniqueKey__Id64_Blob<'a>, "my_blob_table");
+    struct MyFirstTable;
+    impl TableDef for MyFirstTable {
+        fn name() -> &'static str { "my_first_table" }
+        fn flags() -> DbFlags { DbIntKey | DbAllowDups | DbAllowIntDups | DbDupFixed }
+        fn setup(db: &Database) -> MdbResult<()> {
+            db.set_dupsort(sort_reverse::<u64>)
+        }
+    }
+    impl MyFirstTable {
+        fn with<'db>(db: Database<'db>) -> MdbResult<Table<'db, u64, u64>> {
+            try!(Self::setup(&db));
+            Ok(Table{db: db, k: PhantomData, v: PhantomData})
+        }
+    }
+
+    struct MyBlobTable;
+    impl TableDef for MyBlobTable {
+        fn name() -> &'static str { "my_blob_table" }
+        fn flags() -> DbFlags { DbIntKey }
+        fn setup(_db: &Database) -> MdbResult<()> { Ok(()) }
+    }
+    impl MyBlobTable {
+        fn with<'db>(db: Database<'db>) -> MdbResult<Table<'db, u64, &[u8]>> {
+            try!(Self::setup(&db));
+            Ok(Table{db: db, k: PhantomData, v: PhantomData})
+        }
+    }
 
     // A Unique(Id64, Id64 DESC) table
-    let table_handle = MyFirstTable::create_table(&env).unwrap();
-    let blobs_handle = MyBlobTable::create_table(&env).unwrap();
+    let table_handle = MyFirstTable::open(&env, true).unwrap();
+    let blobs_handle = MyBlobTable::open(&env, true).unwrap();
 
     // prepare database
     {
         let txn = env.new_transaction().unwrap();
         {
-            let table = table_handle.bind_transaction(&txn).unwrap(); 
-            let blobs = blobs_handle.bind_transaction(&txn).unwrap();
+            let table = MyFirstTable::with(txn.bind(&table_handle)).unwrap(); 
+            let blobs = MyBlobTable::with(txn.bind(&blobs_handle)).unwrap();
 
             let big_blob: &[u8] = b"Test";
             blobs.set(&1, &big_blob);
@@ -504,7 +288,8 @@ fn test_simple_table() {
     // read
     {
         let rdr = env.get_reader().unwrap();
-        let table = table_handle.bind_reader(&rdr).unwrap();
+
+        let table = MyFirstTable::with(rdr.bind(&table_handle)).unwrap(); 
 
         let mut cursor = table.new_cursor().unwrap();
         cursor.to_key(&1).unwrap(); //  positions on first item of key
@@ -541,6 +326,3 @@ fn test_simple_table() {
         }
     }
 }
-
-
-
