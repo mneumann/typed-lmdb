@@ -7,14 +7,26 @@ use std::marker::PhantomData;
 #[macro_export]
 macro_rules! table_def {
     (
+        pub $structname:ident, $tableclass:ty, $str:expr
+    ) => {
+        #[derive(Clone)]
+        pub struct $structname;
+        impl TableDef for $structname {
+            type C = $tableclass;
+            fn table_name() -> &'static str { $str }
+        }
+    };
+    (
         $structname:ident, $tableclass:ty, $str:expr
     ) => {
+        #[derive(Clone)]
         struct $structname;
         impl TableDef for $structname {
             type C = $tableclass; 
             fn table_name() -> &'static str { $str }
         }
     };
+
 }
 
 #[macro_export]
@@ -80,6 +92,7 @@ pub trait TableDef: Sized {
 }
 
 /// Wraps a lmdb::DbHandle, keeping the TableDef in the type signature.
+#[derive(Clone)]
 pub struct TableHandle<D: TableDef> {
     dbh: DbHandle,
     tabledef: PhantomData<D>,
@@ -191,6 +204,11 @@ impl<'table, D: TableDef> TypedCursor<'table, D> {
     #[inline(always)]
     pub fn to_item(&mut self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
         self.cursor.to_item(key, value)
+    }
+
+    #[inline(always)]
+    pub fn to_gte_item(&mut self, key: &<<D as TableDef>::C as TableClass>::Key, value: &<<D as TableDef>::C as TableClass>::Value) -> MdbResult<()> {
+        self.cursor.to_gte_item(key, value)
     }
 
     #[inline(always)]
@@ -465,7 +483,7 @@ fn test_simple_table() {
         {
             assert!(lmdb_not_found!(cursor.to_item(&2, &3)));
 
-            cursor.to_item(&1, &3).unwrap();
+            cursor.to_gte_item(&1, &4).unwrap();
             assert_eq!((1, 3), cursor.get().unwrap());
 
             cursor.to_next_item().unwrap();
