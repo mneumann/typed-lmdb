@@ -32,9 +32,20 @@ macro_rules! table_def {
 #[macro_export]
 macro_rules! table_def_lifetime {
     (
+        pub $structname:ident, $tableclass:ty, $str:expr
+    ) => {
+        #[derive(Clone)]
+        pub struct $structname<'a> {marker: ::std::marker::PhantomData<&'a()>}
+        impl<'a> TableDef for $structname<'a> {
+            type C = $tableclass; 
+            fn table_name() -> &'static str { $str }
+        }
+    };
+    (
         $structname:ident, $tableclass:ty, $str:expr
     ) => {
-        struct $structname<'a> {marker: PhantomData<&'a()>}
+        #[derive(Clone)]
+        struct $structname<'a> {marker: ::std::marker::PhantomData<&'a()>}
         impl<'a> TableDef for $structname<'a> {
             type C = $tableclass; 
             fn table_name() -> &'static str { $str }
@@ -370,7 +381,6 @@ pub mod table_classes {
             }
         }
     }
-
 
     /// CREATE TABLE (key: Id64, val: Id64, UNIQUE (key ASC, val ASC))
     pub struct Unique__Id64_Id64;
