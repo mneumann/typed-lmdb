@@ -203,7 +203,7 @@ impl<'table, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> TypedCursor
     }
 }
 
-extern "C" fn sort<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val: *const MDB_val) -> lmdb::c_int {
+pub extern "C" fn sort<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val: *const MDB_val) -> lmdb::c_int {
     let lhs = T::from_mdb_value(&unsafe{MdbValue::from_raw(lhs_val)});
     let rhs = T::from_mdb_value(&unsafe{MdbValue::from_raw(rhs_val)});
 
@@ -211,7 +211,7 @@ extern "C" fn sort<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val: *const 
     order as lmdb::c_int
 }
 
-extern "C" fn sort_reverse<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val: *const MDB_val) -> lmdb::c_int {
+pub extern "C" fn sort_reverse<T:FromMdbValue+Ord>(lhs_val: *const MDB_val, rhs_val: *const MDB_val) -> lmdb::c_int {
     let lhs = T::from_mdb_value(&unsafe{MdbValue::from_raw(lhs_val)});
     let rhs = T::from_mdb_value(&unsafe{MdbValue::from_raw(rhs_val)});
     let order: i8 = unsafe { std::mem::transmute(lhs.cmp(&rhs).reverse()) };
@@ -234,7 +234,7 @@ fn test_simple_table() {
         }
     }
     impl MyFirstTable {
-        fn with<'db>(db: Database<'db>) -> MdbResult<Table<'db, u64, u64>> {
+        fn table<'db>(db: Database<'db>) -> MdbResult<Table<'db, u64, u64>> {
             try!(Self::setup(&db));
             Ok(Table{db: db, k: PhantomData, v: PhantomData})
         }
@@ -247,7 +247,7 @@ fn test_simple_table() {
         fn setup(_db: &Database) -> MdbResult<()> { Ok(()) }
     }
     impl MyBlobTable {
-        fn with<'db>(db: Database<'db>) -> MdbResult<Table<'db, u64, &[u8]>> {
+        fn table<'db>(db: Database<'db>) -> MdbResult<Table<'db, u64, &[u8]>> {
             try!(Self::setup(&db));
             Ok(Table{db: db, k: PhantomData, v: PhantomData})
         }
@@ -261,11 +261,11 @@ fn test_simple_table() {
     {
         let txn = env.new_transaction().unwrap();
         {
-            let table = MyFirstTable::with(txn.bind(&table_handle)).unwrap(); 
-            let blobs = MyBlobTable::with(txn.bind(&blobs_handle)).unwrap();
+            let table = MyFirstTable::table(txn.bind(&table_handle)).unwrap(); 
+            let blobs = MyBlobTable::table(txn.bind(&blobs_handle)).unwrap();
 
             let big_blob: &[u8] = b"Test";
-            blobs.set(&1, &big_blob);
+            blobs.set(&1, &big_blob).unwrap();
 
             let back: &[u8] = blobs.get(&1).unwrap();
             assert_eq!(&back[..], &b"Test"[..]);
@@ -289,7 +289,7 @@ fn test_simple_table() {
     {
         let rdr = env.get_reader().unwrap();
 
-        let table = MyFirstTable::with(rdr.bind(&table_handle)).unwrap(); 
+        let table = MyFirstTable::table(rdr.bind(&table_handle)).unwrap(); 
 
         let mut cursor = table.new_cursor().unwrap();
         cursor.to_key(&1).unwrap(); //  positions on first item of key
