@@ -207,6 +207,11 @@ impl<'table, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> TypedCursor
     }
 
     #[inline(always)]
+    pub fn get_value_ref<'a, V2>(&mut self) -> MdbResult<&'a V2> where &'a V2: FromMdbValue {
+        self.cursor.get_value()
+    }
+
+    #[inline(always)]
     pub fn get_key(&mut self) -> MdbResult<K> {
         self.cursor.get_key()
     }
