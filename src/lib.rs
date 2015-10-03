@@ -17,6 +17,20 @@ macro_rules! lmdb_not_found {
     };
 }
 
+#[macro_export]
+macro_rules! impl_table {
+    (
+        $s:ident, $k:ty, $v:ty
+    ) => {
+        impl $s {
+            pub fn table<'db>(db: ::lmdb::Database<'db>) -> ::lmdb::core::MdbResult<Table<'db, $k, $v>> {
+                try!(Self::setup(&db));
+                Ok(Table::new(db))
+            }
+        }
+    };
+}
+
 /// Defines all neccessary information to create/open a database.
 pub trait TableDef {
     fn name() -> &'static str;
