@@ -53,7 +53,10 @@ pub struct Table<'db, K, V> {
     v: PhantomData<V>,
 }
 
-impl<'db, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> Table<'db, K, V> {
+impl<'db, K, V> Table<'db, K, V>
+where K: FromMdbValue + ToMdbValue,
+      V: FromMdbValue + ToMdbValue,
+{
     #[inline(always)]
     pub fn new(db: Database<'db>) -> Table<'db, K, V> {
         Table {db: db, k: PhantomData, v: PhantomData}
@@ -89,6 +92,11 @@ impl<'db, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> Table<'db, K, 
 
     #[inline(always)]
     pub fn get(&self, key: &K) -> MdbResult<V> {
+        self.db.get(key)
+    }
+
+    #[inline(always)]
+    pub fn get_ref<'a, V2>(&self, key: &K) -> MdbResult<&'a V2> where &'a V2: FromMdbValue {
         self.db.get(key)
     }
 
