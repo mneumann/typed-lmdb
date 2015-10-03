@@ -95,6 +95,16 @@ where K: FromMdbValue + ToMdbValue,
         self.db.get(key)
     }
 
+    /// Returns ```alt``` if key was not found.
+    #[inline(always)]
+    pub fn get_or(&self, key: &K, alt: V) -> MdbResult<V> {
+        match self.db.get(key) {
+            Ok(v) => Ok(v),
+            Err(::lmdb::MdbError::NotFound) => Ok(alt),
+            Err(e) => Err(e),
+        }
+    }
+
     #[inline(always)]
     pub fn get_ref<'a, V2>(&self, key: &K) -> MdbResult<&'a V2> where &'a V2: FromMdbValue {
         self.db.get(key)
