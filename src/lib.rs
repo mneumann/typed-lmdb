@@ -114,6 +114,13 @@ where K: FromMdbValue + ToMdbValue,
     pub fn new_cursor<'table>(&'table self) -> MdbResult<TypedCursor<'table, K, V>> {
         Ok(TypedCursor {cursor: try!(self.db.new_cursor()), k: PhantomData, v: PhantomData})
     }
+
+    #[inline(always)]
+    pub fn cursor_at_key<'table>(&'table self, k: &K) -> MdbResult<TypedCursor<'table, K, V>> {
+        let mut cursor = TypedCursor {cursor: try!(self.db.new_cursor()), k: PhantomData, v: PhantomData};
+        try!(cursor.to_key(k));
+        Ok(cursor)
+    }
 }
 
 /// Is a typed version of lmdb::Cursor.

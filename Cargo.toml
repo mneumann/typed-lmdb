@@ -5,3 +5,4 @@ authors = ["Michael Neumann <mneumann@ntecs.de>"]
 
 [dependencies.lmdb-rs]
 git = "https://github.com/vhbit/lmdb-rs.git"
+#path = "../lmdb-rs"
