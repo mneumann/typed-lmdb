@@ -41,6 +41,11 @@ pub struct Table<'db, K, V> {
 
 impl<'db, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> Table<'db, K, V> {
     #[inline(always)]
+    pub fn new(db: Database<'db>) -> Table<'db, K, V> {
+        Table {db: db, k: PhantomData, v: PhantomData}
+    }
+
+    #[inline(always)]
     pub fn set(&self, key: &K, value: &V) -> MdbResult<()> {
         self.db.set(key, value)
     }
