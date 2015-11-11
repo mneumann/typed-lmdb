@@ -208,7 +208,7 @@ impl<'table, K: FromMdbValue+ToMdbValue, V: FromMdbValue+ToMdbValue> TypedCursor
     }
 
     #[inline(always)]
-    pub fn item_count(&mut self) -> MdbResult<u64> {
+    pub fn item_count(&mut self) -> MdbResult<usize> {
         self.cursor.item_count()
     }
 
