@@ -63,6 +63,12 @@ where K: FromMdbValue + ToMdbValue,
     }
 
     #[inline(always)]
+    pub fn ref_db<'a>(&'a self) -> &'a Database<'db> {
+        &self.db
+    }
+
+
+    #[inline(always)]
     pub fn set(&self, key: &K, value: &V) -> MdbResult<()> {
         self.db.set(key, value)
     }
